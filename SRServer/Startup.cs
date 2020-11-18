@@ -50,7 +50,7 @@ namespace SRServer
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllers();
-                //endpoints.MapHub<ChatHub>("/chatHub");
+                endpoints.MapHub<VideoChatHub>("/videoChatHub");
                 endpoints.MapHub<VideoHub>("/videoHub");
             });
         }

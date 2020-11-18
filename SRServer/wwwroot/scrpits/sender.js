@@ -1,4 +1,4 @@
-const webSocket = new WebSocket("ws://localhost:55648")
+const webSocket = new WebSocket("ws://localhost:8080")
 
 webSocket.onmessage = (event) => {
     handleSignallingData(JSON.parse(event.data))
@@ -54,13 +54,7 @@ function startCall() {
         document.getElementById("local-video").srcObject = localStream
 
         let configuration = {
-            iceServers: [
-                {
-                    "urls": ["stun:stun.l.google.com:19302", 
-                    "stun:stun1.l.google.com:19302", 
-                    "stun:stun2.l.google.com:19302"]
-                }
-            ]
+            iceServers: [{ "url": "stun:stun.l.google.com:19302" }]
         }
 
         peerConn = new RTCPeerConnection(configuration)
