@@ -5,11 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="wwwroot\scrpits\receiver.js" />
-    <None Include="wwwroot\scrpits\sender.js" />
-    <None Include="wwwroot\scrpits\server.js" />
     <None Include="wwwroot\styles\style.css" />
-    <None Include="wwwroot\video1.mp4" />
   </ItemGroup>
 
   <ItemGroup>
