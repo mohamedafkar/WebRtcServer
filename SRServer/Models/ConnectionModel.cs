@@ -5,11 +5,11 @@ using System.Threading.Tasks;
 
 namespace SRServer.Models
 {
-    public class CallOffer
-    {
-        public User Caller { get; set; }
-        public User Callee { get; set; }
-    }
+    //public class CallOffer
+    //{
+    //    public User Caller { get; set; }
+    //    public User Callee { get; set; }
+    //}
 
     public class User
     {

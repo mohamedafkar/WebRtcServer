@@ -5,19 +5,44 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
 using SRServer.Models;
 
-namespace SRServer.Controller
+namespace SRServer.Controller.Hubs
 {
-    public class VideoChatHub : Hub<IConnectionHub>
+    public class ConnectionHub : Hub<IConnectionHub>
     {
         private readonly List<User> _Users;
         private readonly List<UserCall> _UserCalls;
-        private readonly List<CallOffer> _CallOffers;
+        //private readonly List<CallOffer> _CallOffers;
 
-        public VideoChatHub(List<User> users, List<UserCall> userCalls, List<CallOffer> callOffers)
+        public ConnectionHub(List<User> users, List<UserCall> userCalls)
         {
             _Users = users;
             _UserCalls = userCalls;
-            _CallOffers = callOffers;
+            //_CallOffers = callOffers;
+        }
+
+        public async override Task OnConnectedAsync()
+        {
+            await Clients.Caller.SendConnectionId(Context.ConnectionId);
+        }
+
+        public override async Task OnDisconnectedAsync(Exception exception)
+        {
+            // Hang up any calls the user is in
+            // await HangUp(); // Gets the user from "Context" which is available in the whole hub
+            //afkar close hagup for now;
+
+            // Remove the user
+            _Users.RemoveAll(u => u.ConnectionId == Context.ConnectionId);
+
+            // Send down the new user list to all clients
+            await SendUserListUpdate();
+
+            await base.OnDisconnectedAsync(exception);
+        }
+
+        public void Disconnected()
+        {
+            Context.Abort();
         }
 
         public async Task Join(string username)
@@ -31,20 +56,8 @@ namespace SRServer.Controller
 
             // Send down the new list to all clients
             await SendUserListUpdate();
-        }
-
-        public override async Task OnDisconnectedAsync(Exception exception)
-        {
-            // Hang up any calls the user is in
-            await HangUp(); // Gets the user from "Context" which is available in the whole hub
-
-            // Remove the user
-            _Users.RemoveAll(u => u.ConnectionId == Context.ConnectionId);
-
-            // Send down the new user list to all clients
-            await SendUserListUpdate();
-
-            await base.OnDisconnectedAsync(exception);
+            //afkar
+            //await Task.FromResult<List<User>>(_Users);
         }
 
         public async Task CallUser(User targetConnectionId)
@@ -63,19 +76,21 @@ namespace SRServer.Controller
             // And that they aren't already in a call
             if (GetUserCall(targetUser.ConnectionId) != null)
             {
-                await Clients.Caller.CallDeclined(targetConnectionId, string.Format("{0} is already in a call.", targetUser.Username));
+                await Clients.Caller
+                    .CallDeclined(targetConnectionId, string.Format("{0} is already in a call.", targetUser.Username));
                 return;
             }
 
             // They are here, so tell them someone wants to talk
-            await Clients.Client(targetConnectionId.ConnectionId).IncomingCall(callingUser);
+            await Clients.Client(targetConnectionId.ConnectionId)
+                .IncomingCall(callingUser);
 
-            // Create an offer
-            _CallOffers.Add(new CallOffer
-            {
-                Caller = callingUser,
-                Callee = targetUser
-            });
+        }
+
+        public async Task CallDeclined(User decliningUser, string reason)
+        {
+            await Clients.Client(decliningUser.ConnectionId).CallDeclined(decliningUser,
+                $"did not accept your call {decliningUser.Username}");
         }
 
         public async Task AnswerCall(bool acceptCall, User targetConnectionId)
@@ -104,14 +119,6 @@ namespace SRServer.Controller
                 return;
             }
 
-            // Make sure there is still an active offer.  If there isn't, then the other use hung up before the Callee answered.
-            var offerCount = _CallOffers.RemoveAll(c => c.Callee.ConnectionId == callingUser.ConnectionId
-                                                  && c.Caller.ConnectionId == targetUser.ConnectionId);
-            if (offerCount < 1)
-            {
-                await Clients.Caller.CallEnded(targetConnectionId, string.Format("{0} has already hung up.", targetUser.Username));
-                return;
-            }
 
             // And finally... make sure the user hasn't accepted another call already
             if (GetUserCall(targetUser.ConnectionId) != null)
@@ -120,9 +127,6 @@ namespace SRServer.Controller
                 await Clients.Caller.CallDeclined(targetConnectionId, string.Format("{0} chose to accept someone elses call instead of yours :(", targetUser.Username));
                 return;
             }
-
-            // Remove all the other offers for the call initiator, in case they have multiple calls out
-            _CallOffers.RemoveAll(c => c.Caller.ConnectionId == targetUser.ConnectionId);
 
             // Create a new call to match these folks up
             _UserCalls.Add(new UserCall
@@ -136,7 +140,6 @@ namespace SRServer.Controller
             // Update the user list, since thes two are now in a call
             await SendUserListUpdate();
         }
-
         public async Task HangUp()
         {
             var callingUser = _Users.SingleOrDefault(u => u.ConnectionId == Context.ConnectionId);
@@ -165,51 +168,51 @@ namespace SRServer.Controller
                 }
             }
 
-            // Remove all offers initiating from the caller
-            _CallOffers.RemoveAll(c => c.Caller.ConnectionId == callingUser.ConnectionId);
-
             await SendUserListUpdate();
         }
 
-        // WebRTC Signal Handler
-        public async Task SendSignal(string signal, string targetConnectionId)
+        public async Task Offer(string CallerConnectionId, string TargetOffer)
         {
-            var callingUser = _Users.SingleOrDefault(u => u.ConnectionId == Context.ConnectionId);
-            var targetUser = _Users.SingleOrDefault(u => u.ConnectionId == targetConnectionId);
+            await Clients.Client(CallerConnectionId).OfferBack(TargetOffer);
+        }
 
-            // Make sure both users are valid
-            if (callingUser == null || targetUser == null)
-            {
-                return;
-            }
+        public async Task AnswerOffer(string TargetConnectionId, string CallerOffer)
+        {
+            await Clients.Client(TargetConnectionId).AnswerBack(CallerOffer);
+        }
 
-            // Make sure that the person sending the signal is in a call
-            var userCall = GetUserCall(callingUser.ConnectionId);
-
-            // ...and that the target is the one they are in a call with
-            if (userCall != null && userCall.Users.Exists(u => u.ConnectionId == targetUser.ConnectionId))
-            {
-                // These folks are in a call together, let's let em talk WebRTC
-                await Clients.Client(targetConnectionId).ReceiveSignal(callingUser, signal);
-            }
+        public async Task IceCandidate(string ConnectionId, string Candidate)
+        {
+            await Clients.Client(ConnectionId).IceCandidate(Candidate);
         }
 
         #region Private Helpers
 
         private async Task SendUserListUpdate()
         {
-            _Users.ForEach(u => u.InCall = (GetUserCall(u.ConnectionId) != null));
+            //_Users.ForEach(u => u.InCall = (GetUserCall(u.ConnectionId) != null));
+            //await Clients.All.UpdateUserList(_Users);
+            //Afkar
+            //var users = _Users.Where(u => u.ConnectionId != Context.ConnectionId).ToList();
             await Clients.All.UpdateUserList(_Users);
         }
 
         private UserCall GetUserCall(string connectionId)
         {
             var matchingCall =
-                _UserCalls.SingleOrDefault(uc => uc.Users.SingleOrDefault(u => u.ConnectionId == connectionId) != null);
+                _UserCalls.SingleOrDefault(uc =>
+                uc.Users.SingleOrDefault(
+                    u => u.ConnectionId == connectionId) != null);
             return matchingCall;
         }
 
         #endregion
+
+
+
+
+
+
     }
     public interface IConnectionHub
     {
@@ -217,7 +220,12 @@ namespace SRServer.Controller
         Task CallAccepted(User acceptingUser);
         Task CallDeclined(User decliningUser, string reason);
         Task IncomingCall(User callingUser);
-        Task ReceiveSignal(User signalingUser, string signal);
         Task CallEnded(User signalingUser, string signal);
+        Task SendConnectionId(string ConnectionId);
+        //afkar
+        //Task SendData(Browser.Types.MediaStream stream);
+        Task OfferBack(string TargetOffer);
+        Task AnswerBack(string TargetOffer);
+        Task IceCandidate(string Candidate);
     }
 }
